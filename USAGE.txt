@@ -1,0 +1,79 @@
+Usage: release-notes <arguments>
+
+Tool to create release notes using Jenkins Promoted and GitHub API
+
+Options:
+
+  -h, --help           
+     Show the help message and exist.
+
+  --directory=DIRECTORY
+     Directory where the git clone is.
+
+     Mandatory.
+
+  --host=JENKINS-HOSTNAME
+     Jenkins host.
+
+     Mandatory.
+
+  --job=JENKINS-JOB-NAME
+     Jenkins build job.
+     
+     Mandatory.
+
+  --promolevel=PROMOTION-LEVEL
+     Jenkins promotion level (integer)
+
+     Mandatory.
+
+  --ssl=[true|false]
+     Use SSL for Jenkins? 
+
+     Optional. Default is false.
+
+  --path=JENKINS-PATH
+     Jenkins path.
+
+     Optional, default is /jenkins.
+
+  --creds=USER:TOKEN
+     Jenkins credentials (format: user:token).
+
+     Optional. Default is None.
+
+  --ghost=GITHUB-API-HOST
+     GitHub API host.
+
+     Optional. Default is api.github.com
+
+  --gtoken=GITHUB-API-TOKEN
+     GitHub API token.
+
+     Mandatory.
+
+  --grepository=ORGANIZATION/REPOSITORY
+     GitHub repository (format: organization/repository).
+
+     Mandatory.
+
+  --gpath=GITHUB-API-PATH
+     GitHub API path.
+
+     Optional. Default is /
+
+  --gssl=[true|false]
+     Use SSL for GitHUB API?
+
+     Optional. Default is true.
+
+  --usemerges=[true|false]
+     Whetever to use commits messages but not PR merge messages to create
+     release notes (False) or useonly PR merge messages (True)
+
+     Optional. Default is false.
+
+  --verbose=[true|false]
+     Be Verbose?
+
+     Optional. Default is false.

@@ -1,0 +1,370 @@
+#!/usr/bin/env python
+# coding=UTF-8
+#
+# Copyright (c) 2014 Julio González Gil
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Tool to create release notes using Jenkins Promoted and GitHub API
+#
+# Main Git repository at:
+# https://github.com/juliogonzalez/release-notes-jenkins-github
+#
+# It requires git CLI installed. No python extra libraries required
+# as the script uses only standard libraries.
+#
+# If you want to know why the script uses optparse and not argparse
+# have a look at the main Git repository.
+
+from base64 import encodestring
+from httplib import HTTPConnection, HTTPSConnection
+from json import loads
+from optparse import OptionParser
+from os.path import isdir
+from subprocess import Popen, PIPE
+from time import ctime
+
+global USERAGENT
+USERAGENT='release-notes plugin'
+
+def print_error(msg):
+  print("[ERROR] %s" %msg)
+
+def print_ok(msg):
+  print("[OK] %s" %msg)
+
+def print_warning(msg):
+  print("[WARNING] %s" %msg)
+
+def print_info(msg):
+  global verbose
+  if verbose:
+    print("[INFO] %s" %msg)
+
+def to_json(string,filepath):
+  try:
+    return(loads(string))
+  except Exception as e:
+    print_error("Error converting JSON %s" % filepath)
+    print_error("%s" %e)
+    exit(4)
+
+def analyze_ghlimit(headers):
+  remaining = False
+  for header in headers:
+    if header[0] == 'x-ratelimit-remaining':
+      remaining = int(header[1])
+    if header[0] == 'x-ratelimit-limit':
+      limit = int(header[1])
+    if header[0] == 'x-ratelimit-reset':
+      reset = ctime(int(header[1]))
+  if remaining is not False:
+    if remaining < 1:
+      print_error("Request limit (%i) reached: %i request left" %(limit,
+                                                                  remaining))
+      print_error("Limit was reseted at: %s" %reset)
+      exit(7)
+
+def get_json_file(remote_path,headers=None,ssl=False):
+  content=get_file(remote_path,headers,ssl)
+  if ssl is True:
+    remote_path = 'https://' + remote_path
+  else:
+    remote_path = 'http://' + remote_path
+  return(to_json(content,remote_path))
+
+def get_file(remote_path,headers=None,ssl=False):
+  host = remote_path.split('/',1)[0]
+  path = remote_path.split('/',1)[1]
+  try:
+    if ssl is True:
+      conn = HTTPSConnection(host)
+      remote_path = 'https://' + remote_path
+    else:
+      conn = HTTPConnection(host)
+      remote_path = 'http://' + remote_path
+    if headers is None:
+      conn.request("GET", url='/' + path)
+    else:
+      conn.request("GET", url='/' + path, headers=headers)
+    response = conn.getresponse()
+    conn.close    
+    content = response.read()
+    analyze_ghlimit(response.getheaders())
+    return(content)
+  except Exception as e:
+    print_error("Error downloading %s" %remote_path)
+    print_error(e)
+    exit(3)
+
+def create_github_headers(token):
+  global USERAGENT
+  headers = {'Authorization' : 'token %s' %token,
+             'User-Agent' : USERAGENT}
+  return(headers)
+
+def create_jenkins_headers(auth):
+  global USERAGENT
+  headers = {'Authorization' : 'Basic %s' %auth,
+             'User-Agent' : USERAGENT}
+  return(headers)
+
+def get_pr_author(token,host,path,repository,prnum,ssl=True):
+  headers=create_github_headers(token)
+  remote_path = host + "%srepos/%s/pulls/%s" %(path,repository,prnum)
+  login=get_json_file(remote_path,headers,ssl)['user']['login']
+  remote_path = host + "%susers/%s" %(path,login)
+  name=get_json_file(remote_path,headers,ssl)['name']
+  return(name)
+
+def get_current_githash(directory):
+  try:
+    return(Popen(['git', 'log', '-n 1',
+                  '--pretty=format:%H', '--abbrev-commit'],
+                 stdout=PIPE,cwd=directory).communicate()[0])
+  except Exception as e:
+    print_error(e)
+    exit(5)
+
+def get_git_commit_page(token,host,path,repository,ssl=True,sha=None,
+                        last_sha=None):
+  headers=create_github_headers(token)
+  remote_path = host + "%srepos/%s/commits" %(path,repository)
+  if sha is not None:
+    remote_path = remote_path + "?sha=%s" %sha
+  if last_sha is not None:
+    if sha is not None:
+      remote_path = remote_path + "&last_sha=%s" %last_sha
+    else:
+      remote_path = remote_path + "?last_sha=%s" %last_sha
+  return(get_json_file(remote_path,headers,ssl))
+
+def get_git_log(githash,host,path,repository,token,directory,ssl,
+                usepr=False):
+  hashfound = False
+  lasthash = None
+  history = []
+  gitlog = []
+  current_githash = get_current_githash(directory)
+  print_info("Current hash %s" %current_githash)
+  gitlog = get_git_commit_page(token,host,path,repository,ssl,
+                             sha=current_githash)
+  try:
+    if gitlog['message'] is not None:
+      exit()
+  except TypeError:
+    pass
+  except SystemExit:
+    print_error("Commit %s not found in remote repository" %current_githash)
+    print_error("Are you using a non pushed branch on the local repository?")
+    exit(6)
+  while hashfound is False:
+    for commit in gitlog:
+      msg = commit['commit']['message'].split('\n')[0]
+      if usepr is True:
+        if msg.startswith('Merge pull request #'):
+          prnum=msg.split()[3][1:]
+          name = get_pr_author(token,host,path,repository,prnum,ssl)
+          text = commit['commit']['message'].split('\n')[2]
+          history.append("* [#%s] %s <%s>\n" %(prnum,text,name))
+          print_info("* [#%s] %s <%s>" %(prnum,text,name))
+      else:
+        if not msg.startswith('Merge pull request #'):
+          name = commit['commit']['committer']['name']
+          text = msg
+          history.append("* %s <%s>\n" %(text,name))
+          print_info("* %s <%s>" %(text,name))
+      if commit['sha'] == githash:
+        hashfound = True
+        break
+    # If the last sha of this page is not equal to the last of the previous
+    # then continue
+    if commit['sha'] != lasthash:
+      gitlog = get_git_commit_page(token,host,path,repository,
+                                 ssl,last_sha=commit['sha'])
+      lasthash = commit['sha']
+    # Else we are at the end of the list
+    else:
+      hashfound = True
+  return(history)
+
+def search_promotion(actions):
+  for action in actions:
+    try:
+	return(action['levelValue'])
+    except:
+        promotion = False
+  return(promotion)
+
+def search_hash(actions):
+  for action in actions:
+    try:
+        return(action['lastBuiltRevision']['SHA1'])
+    except:
+        promotion = False
+  return(promotion)
+
+# Given a promotion level, get its hash
+# If there's no build with such promotion level, return None
+def get_git_hash(host,path,job,promotion_level,ssl,creds):
+  githash = None
+  builds = []
+  headers = None
+  remote_path = host + "%sjob/%s/api/json" %(path,job)
+  if creds is not False:
+     auth = encodestring('%s' %creds).replace('\n', '')
+     headers = create_jenkins_headers(auth)
+  json_job = get_json_file(remote_path,headers=headers,ssl=ssl)
+  builds = json_job['builds']
+  for build in builds:
+    level_value = None
+    remote_path = host + "%sjob/%s/%s/api/json" %(path,job,build['number'])
+    json_build = get_json_file(remote_path,headers=headers,ssl=ssl)
+    if json_build is not None:
+      level_value = search_promotion(json_build['actions'])
+      if level_value is False:
+        print_warning("Build #%s has no promotion level" %build['number'])
+      else:
+        if str(level_value) == str(promotion_level):
+          githash = search_hash(json_build['actions'])
+          return(githash)
+  return(None)
+  
+def write_notes(rnotespath,history):
+  try:
+    f=open(rnotespath,'w')
+    for line in history:
+      f.write("%s" % line.encode('UTF-8'))
+    f.close()
+    print_ok("Release notes written to %s" %rnotespath)
+  except Exception as e:
+    print_error("Error writing file: %s" %e)
+    exit(5)
+
+def check_dir(directory):
+  directory=correct_path(directory,head=False)
+  if not isdir(directory):
+    print_error("%s is not a directory" %directory)
+    exit(2)
+  return(directory)
+
+def correct_path(path,head=True,tail=True):
+  if len(path) > 1:
+    if tail:
+      if path[-1:] != '/':
+        path=path+'/'
+    if head:
+      if path[0] != '/':
+        path='/'+path
+  return(path)
+
+def convert_to_bool(value):
+  if str(value).lower() == "true":
+    return(True)
+  elif str(value).lower() == "false":
+    return(False)
+
+def parse_arguments():
+  usage = "%prog <arguments>"
+  description = ('Tool to create release notes using Jenkins Promoted and '
+                 'GitHub API')
+  parser = OptionParser(usage=usage,description=description)
+  parser.add_option('--directory', action='store',
+                    help='Directory where the git clone is')
+  parser.add_option('--host', action='store', help='Jenkins host')
+  parser.add_option('--job',  action='store', help='Jenkins build job')
+  parser.add_option('--promolevel',
+                    action='store',
+                    help='Jenkins promotion level')
+  parser.add_option('--ssl',
+                    action='store',
+                    help='Use SSL for Jenkins? [Optional, default is False]',
+                    default=False)
+  parser.add_option('--path',
+                    action='store',
+                    help='Jenkins path [Optional, default is /jenkins]',
+                    default='/jenkins')
+  parser.add_option('--creds',
+                    action='store',
+                    help=('Jenkins credentials (user:token) [Optional, default'
+                          'is None]'),
+                    default=False)
+  parser.add_option('--ghost',
+                    action='store',
+                    help=('GitHub API host [Optional, default is '
+                          'api.github.com]'),
+                    default='api.github.com')
+  parser.add_option('--gtoken', action='store', help='GitHub API token')
+  parser.add_option('--grepository',
+                    action='store',
+                    help='GitHub repository (organization/repository)')
+  parser.add_option('--gpath',
+                    action='store',
+                    help='GitHub API path [Optional, default is /]',
+                    default='/')
+  parser.add_option('--gssl',
+                    action='store',
+                    help='Use SSL for GitHUB API? [Optional, default is True]',
+                    default=True)
+  parser.add_option('--usepr',
+                    action='store',
+                    help=('Whetever to use commits messages but not PR merge '
+                          'messages to create release notes (False) or use'
+                          'only PR merge messages (True) [Optional, default is'
+                          'False]'),
+                    default=False)
+  parser.add_option('--verbose', 
+                    action='store',
+                    help='Be Verbose? [Optional, default is False]',
+                    default=False)
+  (options, args) = parser.parse_args()
+  noptions = 0
+  for option in vars(options).iteritems():
+    if option[1] is None:
+      print_error("%s argument is not present! (use -h for help)" %option[0])
+      exit(1)
+  return(options)
+
+def main():
+  global verbose
+  args = parse_arguments()
+  verbose = convert_to_bool(args.verbose)
+  ssl = convert_to_bool(args.ssl)
+  gssl = convert_to_bool(args.gssl)
+  usepr = convert_to_bool(args.usepr)
+  directory = check_dir(args.directory)
+  rnotespath = directory + "release-notes.txt"
+  githash = get_git_hash(args.host,
+      correct_path(args.path),
+      args.job,
+      args.promolevel,
+      ssl,
+      args.creds)
+  if githash is None:
+    print_warning("No promoted build found. Release notes since first commit.")
+  else:
+    print_info("Creating release-notes since hash %s" %githash)
+  history = get_git_log(githash,
+        args.ghost,
+        correct_path(args.gpath),
+        args.grepository,
+        args.gtoken,
+        directory,
+        ssl=gssl,
+        usepr=usepr)
+  print_info("Writing release notes to %s..." %rnotespath)
+  write_notes(rnotespath,history)
+
+if __name__ == "__main__":
+  main()
