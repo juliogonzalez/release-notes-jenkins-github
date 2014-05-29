@@ -172,6 +172,9 @@ def get_git_log(githash,host,path,repository,token,directory,ssl,
   while hashfound is False:
     for commit in gitlog:
       msg = commit['commit']['message'].split('\n')[0]
+      if commit['sha'] == githash:
+        hashfound = True
+        break
       if usepr is True:
         if msg.startswith('Merge pull request #'):
           prnum=msg.split()[3][1:]
@@ -185,9 +188,6 @@ def get_git_log(githash,host,path,repository,token,directory,ssl,
           text = msg
           history.append("* %s <%s>\n" %(text,name))
           print_info("* %s <%s>" %(text,name))
-      if commit['sha'] == githash:
-        hashfound = True
-        break
     # If the last sha of this page is not equal to the last of the previous
     # then continue
     if commit['sha'] != lasthash:
