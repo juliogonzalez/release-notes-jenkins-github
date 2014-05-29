@@ -69,7 +69,8 @@ Options:
 
   --usemerges=[true|false]
      Whetever to use commits messages but not PR merge messages to create
-     release notes (False) or useonly PR merge messages (True)
+     release notes (False), use only PR merge messages (True) or everything
+     (all)
 
      Optional. Default is false.
 

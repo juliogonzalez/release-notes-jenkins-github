@@ -28,6 +28,8 @@
 # have a look at the main Git repository.
 
 from base64 import encodestring
+from datetime import datetime
+from dateutil import tz
 from httplib import HTTPConnection, HTTPSConnection
 from json import loads
 from optparse import OptionParser
@@ -59,6 +61,14 @@ def to_json(string,filepath):
     print_error("Error converting JSON %s" % filepath)
     print_error("%s" %e)
     exit(4)
+
+def str_utc_to_local(timestring):
+  from_zone = tz.tzutc()
+  to_zone = tz.tzlocal()
+  utc = datetime.strptime(timestring, '%Y-%m-%dT%H:%M:%SZ')
+  utc = utc.replace(tzinfo=from_zone)
+  central = utc.astimezone(to_zone)
+  return central.strftime("%a %b %d %H:%M:%S %Y %z")
 
 def analyze_ghlimit(headers):
   remaining = False
@@ -175,14 +185,30 @@ def get_git_log(githash,host,path,repository,token,directory,ssl,
       if commit['sha'] == githash:
         hashfound = True
         break
-      if usepr is True:
+      if usepr == 'all':
+        history.append("commit %s\n" %commit['sha'])
+        try:
+          history.append("Merge: %s %s\n" %(commit['parents'][0]['sha'][:7],
+                                            commit['parents'][1]['sha'][:7]))
+        except:
+          pass
+        history.append("Author:\t%s <%s>\n" %
+                       (commit['commit']['author']['name'],
+                        commit['commit']['author']['email']))
+        date=str_utc_to_local(commit['commit']['author']['date'])
+        history.append("Date:\t%s\n" %date)
+        history.append("\n")
+        for line in commit['commit']['message'].split('\n'):
+          history.append("    %s\n" %line)
+        history.append("\n")
+      elif usepr is True:
         if msg.startswith('Merge pull request #'):
           prnum=msg.split()[3][1:]
           name = get_pr_author(token,host,path,repository,prnum,ssl)
           text = commit['commit']['message'].split('\n')[2]
           history.append("* [#%s] %s <%s>\n" %(prnum,text,name))
           print_info("* [#%s] %s <%s>" %(prnum,text,name))
-      else:
+      elif usepr is False:
         if not msg.startswith('Merge pull request #'):
           name = commit['commit']['committer']['name']
           text = msg
@@ -320,9 +346,9 @@ def parse_arguments():
   parser.add_option('--usepr',
                     action='store',
                     help=('Whetever to use commits messages but not PR merge '
-                          'messages to create release notes (False) or use'
-                          'only PR merge messages (True) [Optional, default is'
-                          'False]'),
+                          'messages to create release notes (False), use only'
+                          'PR merge messages (True) or everything (all)' 
+                          '[Optional, default is False]'),
                     default=False)
   parser.add_option('--filename', action='store', help='Output file',
                     default='release-notes.txt')
@@ -344,7 +370,9 @@ def main():
   verbose = convert_to_bool(args.verbose)
   ssl = convert_to_bool(args.ssl)
   gssl = convert_to_bool(args.gssl)
-  usepr = convert_to_bool(args.usepr)
+  usepr = str(args.usepr).lower() 
+  if usepr != 'all':
+    usepr = convert_to_bool(usepr)
   directory = check_dir(args.directory)
   rnotespath = directory + args.filename
   githash = get_git_hash(args.host,
