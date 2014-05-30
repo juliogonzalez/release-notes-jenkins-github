@@ -27,6 +27,12 @@ Options:
 
      Mandatory.
 
+  --npromos=NUMBER_OF_PROMOTIONS
+    Promotions to look for. Useful if you want to get the log between
+    several builds with the same promotion level.
+
+    Optional, default is 1
+
   --ssl=[true|false]
      Use SSL for Jenkins? 
 

@@ -243,7 +243,7 @@ def search_hash(actions):
 
 # Given a promotion level, get its hash
 # If there's no build with such promotion level, return None
-def get_git_hash(host,path,job,promotion_level,ssl,creds):
+def get_git_hash(host,path,job,promotion_level,npromos,ssl,creds):
   githash = None
   builds = []
   headers = None
@@ -253,6 +253,7 @@ def get_git_hash(host,path,job,promotion_level,ssl,creds):
      headers = create_jenkins_headers(auth)
   json_job = get_json_file(remote_path,headers=headers,ssl=ssl)
   builds = json_job['builds']
+  found_promos = 0
   for build in builds:
     level_value = None
     remote_path = host + "%sjob/%s/%s/api/json" %(path,job,build['number'])
@@ -263,8 +264,10 @@ def get_git_hash(host,path,job,promotion_level,ssl,creds):
         print_warning("Build #%s has no promotion level" %build['number'])
       else:
         if str(level_value) == str(promotion_level):
-          githash = search_hash(json_build['actions'])
-          return(githash)
+          found_promos += 1
+          if found_promos == npromos:
+            githash = search_hash(json_build['actions'])
+            return(githash)
   return(None)
   
 def write_notes(rnotespath,history):
@@ -301,6 +304,12 @@ def convert_to_bool(value):
   elif str(value).lower() == "false":
     return(False)
 
+def convert_to_int(value):
+  try:
+    return int(value)
+  except:
+    return None
+
 def parse_arguments():
   usage = "%prog <arguments>"
   description = ('Tool to create release notes using Jenkins Promoted and '
@@ -313,6 +322,10 @@ def parse_arguments():
   parser.add_option('--promolevel',
                     action='store',
                     help='Jenkins promotion level')
+  parser.add_option('--npromos',
+                    action='store',
+                    help='Promotions to look for [Optional, default is 1]',
+                    default=1)
   parser.add_option('--ssl',
                     action='store',
                     help='Use SSL for Jenkins? [Optional, default is False]',
@@ -370,6 +383,7 @@ def main():
   verbose = convert_to_bool(args.verbose)
   ssl = convert_to_bool(args.ssl)
   gssl = convert_to_bool(args.gssl)
+  npromos = convert_to_int(args.npromos)
   usepr = str(args.usepr).lower() 
   if usepr != 'all':
     usepr = convert_to_bool(usepr)
@@ -379,6 +393,7 @@ def main():
       correct_path(args.path),
       args.job,
       args.promolevel,
+      npromos,
       ssl,
       args.creds)
   if githash is None:
