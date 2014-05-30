@@ -81,7 +81,6 @@ Options:
      Optional. Default is false.
 
   --filename=FILENAME_WITHOUT_PATH
-
      Output filename without path (use --directory for this)
                     
      Optional. Default is release-notes.txt
