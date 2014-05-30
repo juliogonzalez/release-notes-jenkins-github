@@ -206,7 +206,7 @@ def get_git_log(githash,host,path,repository,token,directory,ssl,
           prnum=msg.split()[3][1:]
           name = get_pr_author(token,host,path,repository,prnum,ssl)
           text = commit['commit']['message'].split('\n')[2]
-          history.append("* [#%s] %s <%s>\n" %(prnum,text,name))
+          history.append("* [PR#%s] %s <%s>\n" %(prnum,text,name))
           print_info("* [#%s] %s <%s>" %(prnum,text,name))
       elif usepr is False:
         if not msg.startswith('Merge pull request #'):
