@@ -254,19 +254,25 @@ def get_git_hash(host,path,job,promotion_level,npromos,ssl,creds):
   json_job = get_json_file(remote_path,headers=headers,ssl=ssl)
   builds = json_job['builds']
   found_promos = 0
+  lasthash = None
   for build in builds:
     level_value = None
     remote_path = host + "%sjob/%s/%s/api/json" %(path,job,build['number'])
     json_build = get_json_file(remote_path,headers=headers,ssl=ssl)
     if json_build is not None:
       level_value = search_promotion(json_build['actions'])
+      githash = search_hash(json_build['actions'])
       if level_value is False:
         print_warning("Build #%s has no promotion level" %build['number'])
+      elif githash == lasthash:
+        print_warning("Ignoring #%s: hash is the same as for previous build"
+                       %build['number'])
       else:
         if str(level_value) == str(promotion_level):
           found_promos += 1
+          lasthash = githash
           if found_promos == npromos:
-            githash = search_hash(json_build['actions'])
+            githash = githash
             return(githash)
   return(None)
   
