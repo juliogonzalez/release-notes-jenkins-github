@@ -57,7 +57,7 @@ option.
 
 **Why are you using GitHub commit log instead of the local commit log?**
 
-Because in my current project with make shallow clones for the CI so we can
+Because in my current project we make shallow clones for the CI so we can
 save a lot of space and bandwith. When you perform shallow clones you don't
 have the whole log but the last 'n' commits noted by the --depth argument
 (for Git CLI).
